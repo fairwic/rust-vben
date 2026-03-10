@@ -1,25 +1,27 @@
-#![allow(async_fn_in_trait)]
-#![allow(stable_features)]
-#![feature(async_fn_in_trait)]
-#![feature(lazy_cell)]
-#![feature(let_chains)]
+use std::net::SocketAddr;
 
-mod controller;
-mod domain;
-mod extension;
-mod logic;
-mod middleware;
-mod model;
-mod router;
-mod schedule;
-mod service;
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "rust_vben=info,tower_http=info".into()),
+        )
+        .init();
 
-use zino::prelude::*;
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(5320);
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-fn main() {
-    zino::Cluster::boot()
-        .register(router::routes())
-        .register_debug(router::debug_routes())
-        .spawn(schedule::jobs())
-        .run(schedule::async_jobs())
+    tracing::info!("starting rust-vben API on http://{addr}");
+
+    let app = rust_vben::build_app()
+        .await
+        .expect("application should initialize");
+
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .expect("server should start");
 }
