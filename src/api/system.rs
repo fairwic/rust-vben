@@ -8,7 +8,8 @@ use axum::{
 use crate::{
     models::system::{
         CreateDeptRequest, CreateMenuRequest, CreateRoleRequest, DeptListResponse, MenuExistsQuery,
-        RoleListQuery, UpdateDeptRequest, UpdateMenuRequest, UpdateRoleRequest,
+        RoleListQuery, UpdateDeptRequest, UpdateMenuRequest, UpdateRoleRequest, UpdateUserRequest,
+        UserListQuery, CreateUserRequest,
     },
     response::{error_response, success_response},
     services::{auth as auth_service, system as system_service},
@@ -16,7 +17,7 @@ use crate::{
 };
 
 fn ensure_authorized(headers: &HeaderMap) -> Result<(), Response> {
-    auth_service::authorize(headers).map(|_| ()).ok_or_else(|| {
+    auth_service::authorize_sync(headers).map(|_| ()).ok_or_else(|| {
         error_response(
             axum::http::StatusCode::UNAUTHORIZED,
             "Unauthorized Exception",
@@ -214,6 +215,63 @@ pub async fn delete_dept(
     }
     match system_service::delete_dept(&state, &id).await {
         Ok(dept) => Json(success_response(dept)).into_response(),
+        Err((status, message)) => error_response(status, message),
+    }
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<UserListQuery>,
+) -> Response {
+    if let Err(response) = ensure_authorized(&headers) {
+        return response;
+    }
+    match system_service::list_users(&state, query).await {
+        Ok(result) => Json(success_response(result)).into_response(),
+        Err((status, message)) => error_response(status, message),
+    }
+}
+
+pub async fn create_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<CreateUserRequest>,
+) -> Response {
+    if let Err(response) = ensure_authorized(&headers) {
+        return response;
+    }
+    match system_service::create_user(&state, payload).await {
+        Ok(user) => Json(success_response(user)).into_response(),
+        Err((status, message)) => error_response(status, message),
+    }
+}
+
+pub async fn update_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<UpdateUserRequest>,
+) -> Response {
+    if let Err(response) = ensure_authorized(&headers) {
+        return response;
+    }
+    match system_service::update_user(&state, &id, payload).await {
+        Ok(user) => Json(success_response(user)).into_response(),
+        Err((status, message)) => error_response(status, message),
+    }
+}
+
+pub async fn delete_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if let Err(response) = ensure_authorized(&headers) {
+        return response;
+    }
+    match system_service::delete_user(&state, &id).await {
+        Ok(user) => Json(success_response(user)).into_response(),
         Err((status, message)) => error_response(status, message),
     }
 }

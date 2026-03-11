@@ -230,3 +230,119 @@ pub struct UpdateDeptRequest {
 }
 
 pub type DeptListResponse = Vec<SystemDept>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemUser {
+    #[serde(rename = "avatar", default)]
+    pub avatar: String,
+    #[serde(rename = "createTime")]
+    pub create_time: String,
+    #[serde(rename = "deptId", default, skip_serializing_if = "Option::is_none")]
+    pub dept_id: Option<String>,
+    #[serde(rename = "deptName", default, skip_serializing_if = "Option::is_none")]
+    pub dept_name: Option<String>,
+    #[serde(default)]
+    pub email: String,
+    #[serde(rename = "homePath")]
+    pub home_path: String,
+    pub id: String,
+    #[serde(default)]
+    pub phone: String,
+    #[serde(rename = "realName")]
+    pub real_name: String,
+    #[serde(default)]
+    pub remark: String,
+    #[serde(rename = "roleIds")]
+    pub role_ids: Vec<String>,
+    #[serde(rename = "roleNames")]
+    pub role_names: Vec<String>,
+    pub status: i32,
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateUserRequest {
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(rename = "deptId", default)]
+    pub dept_id: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(rename = "homePath", default)]
+    pub home_path: Option<String>,
+    pub password: String,
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(rename = "realName")]
+    pub real_name: String,
+    #[serde(default)]
+    pub remark: Option<String>,
+    #[serde(rename = "roleIds", default)]
+    pub role_ids: Vec<String>,
+    pub status: i32,
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UpdateUserRequest {
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(rename = "deptId", default)]
+    pub dept_id: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(rename = "homePath", default)]
+    pub home_path: Option<String>,
+    pub password: Option<String>,
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(rename = "realName", default)]
+    pub real_name: Option<String>,
+    #[serde(default)]
+    pub remark: Option<String>,
+    #[serde(rename = "roleIds", default)]
+    pub role_ids: Option<Vec<String>>,
+    pub status: Option<i32>,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserListQuery {
+    #[serde(rename = "deptId")]
+    pub dept_id: Option<String>,
+    pub email: Option<String>,
+    #[serde(rename = "endTime")]
+    pub end_time: Option<String>,
+    pub page: Option<usize>,
+    #[serde(rename = "pageSize")]
+    pub page_size: Option<usize>,
+    pub phone: Option<String>,
+    #[serde(rename = "realName")]
+    pub real_name: Option<String>,
+    #[serde(rename = "startTime")]
+    pub start_time: Option<String>,
+    pub status: Option<i32>,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UserListResponse {
+    pub items: Vec<SystemUser>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserRecord {
+    pub avatar: String,
+    pub dept_id: Option<String>,
+    pub email: String,
+    pub home_path: String,
+    pub id: String,
+    pub password: String,
+    pub phone: String,
+    pub real_name: String,
+    pub remark: String,
+    pub role_ids: Vec<String>,
+    pub status: i32,
+    pub username: String,
+}

@@ -40,6 +40,12 @@ pub fn build_router(state: AppState) -> Router {
             "/system/dept/:id",
             put(system::update_dept).delete(system::delete_dept),
         )
+        .route("/system/user/list", get(system::list_users))
+        .route("/system/user", post(system::create_user))
+        .route(
+            "/system/user/:id",
+            put(system::update_user).delete(system::delete_user),
+        )
         .route("/timezone/getTimezone", get(timezone::get_timezone))
         .route(
             "/timezone/getTimezoneOptions",

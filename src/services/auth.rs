@@ -2,12 +2,13 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use serde_json::{json, Value};
 
 use crate::{
-    models::auth::{LoginRequest, LoginResponse, MockUser, UserInfoResponse, MOCK_USERS},
+    models::auth::{AuthUser, AuthUserRecord, LoginRequest, LoginResponse, UserInfoResponse},
+    repositories::user as user_repo,
     state::AppState,
 };
 
 pub async fn login(
-    _state: &AppState,
+    state: &AppState,
     payload: LoginRequest,
 ) -> Result<(HeaderValue, LoginResponse), (StatusCode, &'static str)> {
     if payload.username.is_empty() || payload.password.is_empty() {
@@ -17,74 +18,76 @@ pub async fn login(
         ));
     }
 
-    let user = find_user_by_credentials(&payload.username, &payload.password)
+    let user = user_repo::get_auth_user_by_username(&state.pool, &payload.username)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?
         .ok_or((StatusCode::FORBIDDEN, "Username or password is incorrect."))?;
+    if user.status != 1 || user.password != payload.password {
+        return Err((StatusCode::FORBIDDEN, "Username or password is incorrect."));
+    }
 
-    Ok((refresh_cookie_for(user.username), to_login_response(user)))
+    let auth_user = build_auth_user(state, user)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?;
+    Ok((
+        refresh_cookie_for(&auth_user.username),
+        to_login_response(&auth_user),
+    ))
 }
 
-pub fn refresh(headers: &HeaderMap) -> Result<(HeaderValue, String), (StatusCode, &'static str)> {
+pub async fn refresh(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(HeaderValue, String), (StatusCode, &'static str)> {
     let username = username_from_refresh_headers(headers)
         .ok_or((StatusCode::FORBIDDEN, "Forbidden Exception"))?;
+    let user = user_repo::get_auth_user_by_username(&state.pool, &username)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?
+        .ok_or((StatusCode::FORBIDDEN, "Forbidden Exception"))?;
+    if user.status != 1 {
+        return Err((StatusCode::FORBIDDEN, "Forbidden Exception"));
+    }
     Ok((refresh_cookie_for(&username), access_token_for(&username)))
 }
 
-pub fn authorize(headers: &HeaderMap) -> Option<&'static MockUser> {
-    let username = headers
+pub async fn authorize(state: &AppState, headers: &HeaderMap) -> Option<AuthUser> {
+    let username = authorize_sync(headers)?;
+    let user = user_repo::get_auth_user_by_username(&state.pool, &username)
+        .await
+        .ok()??;
+    if user.status != 1 {
+        return None;
+    }
+    build_auth_user(state, user).await.ok()
+}
+
+pub fn authorize_sync(headers: &HeaderMap) -> Option<String> {
+    headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(username_from_authorization)?;
-    find_user_by_username(&username)
+        .and_then(username_from_authorization)
 }
 
-pub fn access_codes_for(username: &str) -> Vec<String> {
-    match username {
-        "vben" | "admin" => vec![
-            "AC_100010".into(),
-            "AC_100020".into(),
-            "AC_100030".into(),
-            "System:Role:List".into(),
-            "System:Role:Create".into(),
-            "System:Role:Edit".into(),
-            "System:Role:Delete".into(),
-            "System:Menu:List".into(),
-            "System:Menu:Create".into(),
-            "System:Menu:Edit".into(),
-            "System:Menu:Delete".into(),
-            "System:Dept:List".into(),
-            "System:Dept:Create".into(),
-            "System:Dept:Edit".into(),
-            "System:Dept:Delete".into(),
-        ],
-        "jack" => vec!["AC_1000001".into(), "AC_1000002".into()],
-        _ => Vec::new(),
-    }
-}
-
-pub fn to_user_info(user: &MockUser) -> UserInfoResponse {
+pub fn to_user_info(user: &AuthUser) -> UserInfoResponse {
     UserInfoResponse {
-        avatar: user.avatar.to_string(),
-        home_path: user.home_path.to_string(),
-        real_name: user.real_name.to_string(),
-        roles: user.roles.iter().map(|role| (*role).to_string()).collect(),
-        user_id: user.user_id.to_string(),
-        username: user.username.to_string(),
+        avatar: user.avatar.clone(),
+        home_path: user.home_path.clone(),
+        real_name: user.real_name.clone(),
+        roles: user.roles.clone(),
+        user_id: user.user_id.clone(),
+        username: user.username.clone(),
     }
 }
 
-pub async fn bootstrap_menu_tree(state: &AppState, username: &str) -> Value {
-    let system_children = crate::services::system::navigation_menus(state)
+pub async fn bootstrap_menu_tree(state: &AppState, user: &AuthUser) -> Value {
+    let system_children = crate::services::system::navigation_menus_for_user(state, &user.user_id)
         .await
         .ok()
-        .and_then(|menus| {
-            menus.into_iter()
-                .find(|menu| menu.path == "/system")
-                .and_then(|menu| menu.children)
-        })
         .unwrap_or_default();
 
-    let role_specific = match username {
-        "vben" => json!({
+    let role_specific = if user.roles.iter().any(|role| role == "super") {
+        json!({
             "component": "/demos/access/super-visible",
             "meta": {
                 "icon": "mdi:button-cursor",
@@ -92,8 +95,9 @@ pub async fn bootstrap_menu_tree(state: &AppState, username: &str) -> Value {
             },
             "name": "AccessSuperVisibleDemo",
             "path": "/demos/access/super-visible"
-        }),
-        "admin" => json!({
+        })
+    } else if user.roles.iter().any(|role| role == "admin") {
+        json!({
             "component": "/demos/access/admin-visible",
             "meta": {
                 "icon": "mdi:button-cursor",
@@ -101,8 +105,9 @@ pub async fn bootstrap_menu_tree(state: &AppState, username: &str) -> Value {
             },
             "name": "AccessAdminVisibleDemo",
             "path": "/demos/access/admin-visible"
-        }),
-        _ => json!({
+        })
+    } else {
+        json!({
             "component": "/demos/access/user-visible",
             "meta": {
                 "icon": "mdi:button-cursor",
@@ -110,7 +115,7 @@ pub async fn bootstrap_menu_tree(state: &AppState, username: &str) -> Value {
             },
             "name": "AccessUserVisibleDemo",
             "path": "/demos/access/user-visible"
-        }),
+        })
     };
 
     let mut menus = vec![
@@ -187,7 +192,7 @@ pub async fn bootstrap_menu_tree(state: &AppState, username: &str) -> Value {
         }),
     ];
 
-    if username != "jack" {
+    if !system_children.is_empty() {
         menus.push(json!({
             "meta": {
                 "icon": "ion:settings-outline",
@@ -241,25 +246,60 @@ fn username_from_refresh_headers(headers: &HeaderMap) -> Option<String> {
         .and_then(|token| token.strip_prefix("mock-refresh:").map(ToOwned::to_owned))
 }
 
-fn to_login_response(user: &MockUser) -> LoginResponse {
+fn to_login_response(user: &AuthUser) -> LoginResponse {
     LoginResponse {
-        access_token: access_token_for(user.username),
-        avatar: user.avatar.to_string(),
-        home_path: user.home_path.to_string(),
-        id: user.user_id.to_string(),
-        real_name: user.real_name.to_string(),
-        roles: user.roles.iter().map(|role| (*role).to_string()).collect(),
-        user_id: user.user_id.to_string(),
-        username: user.username.to_string(),
+        access_token: access_token_for(&user.username),
+        avatar: user.avatar.clone(),
+        home_path: user.home_path.clone(),
+        id: user.user_id.clone(),
+        real_name: user.real_name.clone(),
+        roles: user.roles.clone(),
+        user_id: user.user_id.clone(),
+        username: user.username.clone(),
     }
 }
 
-fn find_user_by_credentials(username: &str, password: &str) -> Option<&'static MockUser> {
-    MOCK_USERS
-        .iter()
-        .find(|user| user.username == username && user.password == password)
+async fn build_auth_user(state: &AppState, user: AuthUserRecord) -> Result<AuthUser, sqlx::Error> {
+    let permission_ids = user_repo::list_user_permission_ids(&state.pool, &user.user_id).await?;
+    let mut access_codes = user_repo::list_permission_auth_codes(&state.pool, &permission_ids).await?;
+    access_codes.extend(demo_access_codes(&user.role_ids));
+    access_codes.sort();
+    access_codes.dedup();
+
+    Ok(AuthUser {
+        access_codes,
+        avatar: user.avatar,
+        home_path: user.home_path,
+        id: user.id.clone(),
+        real_name: user.real_name,
+        roles: user.role_ids.iter().map(|role_id| role_code_from_id(role_id)).collect(),
+        status: user.status,
+        user_id: user.user_id,
+        username: user.username,
+    })
 }
 
-fn find_user_by_username(username: &str) -> Option<&'static MockUser> {
-    MOCK_USERS.iter().find(|user| user.username == username)
+fn demo_access_codes(role_ids: &[String]) -> Vec<String> {
+    let role_codes = role_ids
+        .iter()
+        .map(|role_id| role_code_from_id(role_id))
+        .collect::<Vec<_>>();
+    if role_codes.iter().any(|role| role == "super" || role == "admin") {
+        return vec![
+            "AC_100010".into(),
+            "AC_100020".into(),
+            "AC_100030".into(),
+        ];
+    }
+    if role_codes.iter().any(|role| role == "user") {
+        return vec!["AC_1000001".into(), "AC_1000002".into()];
+    }
+    Vec::new()
+}
+
+fn role_code_from_id(role_id: &str) -> String {
+    role_id
+        .strip_prefix("role-")
+        .unwrap_or(role_id)
+        .to_string()
 }

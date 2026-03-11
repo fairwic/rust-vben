@@ -37,8 +37,8 @@ pub async fn logout(headers: HeaderMap) -> Response {
     response
 }
 
-pub async fn refresh(headers: HeaderMap) -> Response {
-    match auth_service::refresh(&headers) {
+pub async fn refresh(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match auth_service::refresh(&state, &headers).await {
         Ok((cookie, token)) => {
             let mut response = Json(token).into_response();
             response.headers_mut().insert(header::SET_COOKIE, cookie);
@@ -48,12 +48,9 @@ pub async fn refresh(headers: HeaderMap) -> Response {
     }
 }
 
-pub async fn access_codes(headers: HeaderMap) -> Response {
-    match auth_service::authorize(&headers) {
-        Some(user) => Json(success_response(auth_service::access_codes_for(
-            user.username,
-        )))
-        .into_response(),
+pub async fn access_codes(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match auth_service::authorize(&state, &headers).await {
+        Some(user) => Json(success_response(user.access_codes)).into_response(),
         None => error_response(
             axum::http::StatusCode::UNAUTHORIZED,
             "Unauthorized Exception",
@@ -61,9 +58,9 @@ pub async fn access_codes(headers: HeaderMap) -> Response {
     }
 }
 
-pub async fn user_info(headers: HeaderMap) -> Response {
-    match auth_service::authorize(&headers) {
-        Some(user) => Json(success_response(auth_service::to_user_info(user))).into_response(),
+pub async fn user_info(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match auth_service::authorize(&state, &headers).await {
+        Some(user) => Json(success_response(auth_service::to_user_info(&user))).into_response(),
         None => error_response(
             axum::http::StatusCode::UNAUTHORIZED,
             "Unauthorized Exception",
@@ -72,9 +69,9 @@ pub async fn user_info(headers: HeaderMap) -> Response {
 }
 
 pub async fn menu_all(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match auth_service::authorize(&headers) {
+    match auth_service::authorize(&state, &headers).await {
         Some(user) => Json(success_response(
-            auth_service::bootstrap_menu_tree(&state, user.username).await,
+            auth_service::bootstrap_menu_tree(&state, &user).await,
         ))
         .into_response(),
         None => error_response(
