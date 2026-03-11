@@ -11,6 +11,7 @@ use crate::{
 struct UserRow {
     avatar: String,
     create_time: String,
+    desc: String,
     dept_id: Option<String>,
     dept_name: Option<String>,
     email: String,
@@ -28,12 +29,14 @@ struct UserRow {
 #[derive(Debug, FromRow)]
 struct AuthUserRow {
     avatar: String,
+    desc: String,
     home_path: String,
     id: String,
     password: String,
     real_name: String,
     role_ids: Vec<String>,
     status: i16,
+    timezone: String,
     username: String,
 }
 
@@ -42,6 +45,7 @@ impl From<UserRow> for SystemUser {
         Self {
             avatar: row.avatar,
             create_time: row.create_time,
+            desc: row.desc,
             dept_id: row.dept_id,
             dept_name: row.dept_name,
             email: row.email,
@@ -62,12 +66,14 @@ impl From<AuthUserRow> for AuthUserRecord {
     fn from(row: AuthUserRow) -> Self {
         Self {
             avatar: row.avatar,
+            desc: row.desc,
             home_path: row.home_path,
             id: row.id.clone(),
             password: row.password,
             real_name: row.real_name,
             role_ids: row.role_ids,
             status: i32::from(row.status),
+            timezone: row.timezone,
             user_id: row.id,
             username: row.username,
         }
@@ -105,6 +111,7 @@ pub async fn get_user(pool: &PgPool, id: &str) -> Result<Option<SystemUser>, sql
         SELECT
             u.avatar,
             to_char(u.created_at, 'YYYY/MM/DD HH24:MI:SS') AS create_time,
+            u."desc",
             u.dept_id,
             d.name AS dept_name,
             u.email,
@@ -138,9 +145,9 @@ pub async fn insert_user(pool: &PgPool, user: &UserRecord) -> Result<SystemUser,
     sqlx::query(
         r#"
         INSERT INTO admin_users (
-            id, username, password, real_name, avatar, home_path, email, phone, dept_id, remark, status
+            id, username, password, real_name, avatar, home_path, email, phone, dept_id, remark, status, "desc", timezone
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         "#,
     )
     .bind(&user.id)
@@ -154,6 +161,8 @@ pub async fn insert_user(pool: &PgPool, user: &UserRecord) -> Result<SystemUser,
     .bind(user.dept_id.as_deref())
     .bind(&user.remark)
     .bind(user.status as i16)
+    .bind(&user.desc)
+    .bind(&user.timezone)
     .execute(&mut *tx)
     .await?;
 
@@ -181,6 +190,8 @@ pub async fn update_user(pool: &PgPool, user: &UserRecord) -> Result<SystemUser,
             dept_id = $9,
             remark = $10,
             status = $11,
+            "desc" = $12,
+            timezone = $13,
             updated_at = NOW()
         WHERE id = $1
         "#,
@@ -196,6 +207,8 @@ pub async fn update_user(pool: &PgPool, user: &UserRecord) -> Result<SystemUser,
     .bind(user.dept_id.as_deref())
     .bind(&user.remark)
     .bind(user.status as i16)
+    .bind(&user.desc)
+    .bind(&user.timezone)
     .execute(&mut *tx)
     .await?;
 
@@ -229,12 +242,14 @@ pub async fn get_auth_user_by_username(
         r#"
         SELECT
             u.avatar,
+            u."desc",
             u.home_path,
             u.id,
             u.password,
             u.real_name,
             COALESCE(array_agg(DISTINCT r.id) FILTER (WHERE r.id IS NOT NULL), '{}'::text[]) AS role_ids,
             u.status,
+            u.timezone,
             u.username
         FROM admin_users u
         LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -265,6 +280,85 @@ pub async fn list_user_permission_ids(
     .bind(user_id)
     .fetch_all(pool)
     .await
+}
+
+pub async fn update_user_profile(
+    pool: &PgPool,
+    user_id: &str,
+    real_name: &str,
+    desc: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE admin_users
+        SET real_name = $2,
+            "desc" = $3,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(user_id)
+    .bind(real_name)
+    .bind(desc)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn change_user_password(
+    pool: &PgPool,
+    user_id: &str,
+    new_password: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE admin_users
+        SET password = $2,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(user_id)
+    .bind(new_password)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn get_user_timezone(pool: &PgPool, user_id: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT timezone
+        FROM admin_users
+        WHERE id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn set_user_timezone(
+    pool: &PgPool,
+    user_id: &str,
+    timezone: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE admin_users
+        SET timezone = $2,
+            updated_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(user_id)
+    .bind(timezone)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 pub async fn list_permission_auth_codes(
@@ -334,6 +428,7 @@ fn build_user_select_query(query: &UserListQuery) -> QueryBuilder<'_, Postgres> 
         SELECT
             u.avatar,
             to_char(u.created_at, 'YYYY/MM/DD HH24:MI:SS') AS create_time,
+            u."desc",
             u.dept_id,
             d.name AS dept_name,
             u.email,

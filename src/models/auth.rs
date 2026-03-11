@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct AuthUser {
     pub access_codes: Vec<String>,
     pub avatar: String,
+    pub desc: String,
     pub home_path: String,
     pub id: String,
     pub real_name: String,
@@ -16,12 +17,14 @@ pub struct AuthUser {
 #[derive(Debug, Clone)]
 pub struct AuthUserRecord {
     pub avatar: String,
+    pub desc: String,
     pub home_path: String,
     pub id: String,
     pub password: String,
     pub real_name: String,
     pub role_ids: Vec<String>,
     pub status: i32,
+    pub timezone: String,
     pub user_id: String,
     pub username: String,
 }
@@ -30,6 +33,27 @@ pub struct AuthUserRecord {
 pub struct LoginRequest {
     pub password: String,
     pub username: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    #[serde(default)]
+    pub desc: String,
+    #[serde(rename = "realName")]
+    pub real_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePasswordRequest {
+    #[serde(rename = "newPassword")]
+    pub new_password: String,
+    #[serde(rename = "oldPassword")]
+    pub old_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TimezoneRequest {
+    pub timezone: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +75,7 @@ pub struct LoginResponse {
 #[derive(Debug, Serialize)]
 pub struct UserInfoResponse {
     pub avatar: String,
+    pub desc: String,
     #[serde(rename = "homePath")]
     pub home_path: String,
     #[serde(rename = "realName")]

@@ -19,6 +19,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/refresh", post(auth::refresh))
         .route("/auth/codes", get(auth::access_codes))
         .route("/user/info", get(auth::user_info))
+        .route("/user/profile", put(auth::update_profile))
+        .route("/user/password", put(auth::update_password))
         .route("/menu/all", get(auth::menu_all))
         .route("/system/role/list", get(system::list_roles))
         .route("/system/role", post(system::create_role))

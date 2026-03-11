@@ -349,6 +349,7 @@ pub async fn create_user(
     let user = UserRecord {
         avatar: payload.avatar.unwrap_or_default(),
         dept_id: payload.dept_id.filter(|value| !value.trim().is_empty()),
+        desc: String::new(),
         email: payload.email.unwrap_or_default(),
         home_path: payload.home_path.unwrap_or_else(|| "/analytics".to_string()),
         id: generate_id("user"),
@@ -358,6 +359,7 @@ pub async fn create_user(
         remark: payload.remark.unwrap_or_default(),
         role_ids: payload.role_ids,
         status: payload.status,
+        timezone: "Asia/Shanghai".to_string(),
         username: payload.username,
     };
 
@@ -420,6 +422,7 @@ pub async fn update_user(
     let record = UserRecord {
         avatar: user.avatar,
         dept_id: user.dept_id,
+        desc: user.desc,
         email: user.email,
         home_path: user.home_path,
         id: user.id,
@@ -429,6 +432,7 @@ pub async fn update_user(
         remark: user.remark,
         role_ids: user.role_ids,
         status: user.status,
+        timezone: auth_user.timezone,
         username: user.username,
     };
 

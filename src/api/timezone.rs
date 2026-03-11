@@ -1,10 +1,28 @@
-use axum::{extract::Json, response::IntoResponse};
-use serde_json::{json, Value};
+use axum::{
+    extract::{Json, State},
+    http::HeaderMap,
+    response::{IntoResponse, Response},
+};
+use serde_json::json;
 
-use crate::response::success_response;
+use crate::{
+    models::auth::TimezoneRequest,
+    response::{error_response, success_response},
+    services::auth as auth_service,
+    state::AppState,
+};
 
-pub async fn get_timezone() -> impl IntoResponse {
-    Json(success_response("Asia/Shanghai"))
+pub async fn get_timezone(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    match auth_service::authorize(&state, &headers).await {
+        Some(user) => match auth_service::get_timezone(&state, &user).await {
+            Ok(timezone) => Json(success_response(timezone)).into_response(),
+            Err((status, message)) => error_response(status, message),
+        },
+        None => error_response(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized Exception",
+        ),
+    }
 }
 
 pub async fn get_timezone_options() -> impl IntoResponse {
@@ -15,6 +33,19 @@ pub async fn get_timezone_options() -> impl IntoResponse {
     ]))
 }
 
-pub async fn set_timezone(Json(_payload): Json<Value>) -> impl IntoResponse {
-    Json(success_response(""))
+pub async fn set_timezone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<TimezoneRequest>,
+) -> Response {
+    match auth_service::authorize(&state, &headers).await {
+        Some(user) => match auth_service::set_timezone(&state, &user, payload).await {
+            Ok(()) => Json(success_response("")).into_response(),
+            Err((status, message)) => error_response(status, message),
+        },
+        None => error_response(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized Exception",
+        ),
+    }
 }

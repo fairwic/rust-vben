@@ -237,6 +237,8 @@ pub struct SystemUser {
     pub avatar: String,
     #[serde(rename = "createTime")]
     pub create_time: String,
+    #[serde(default)]
+    pub desc: String,
     #[serde(rename = "deptId", default, skip_serializing_if = "Option::is_none")]
     pub dept_id: Option<String>,
     #[serde(rename = "deptName", default, skip_serializing_if = "Option::is_none")]
@@ -335,6 +337,7 @@ pub struct UserListResponse {
 pub struct UserRecord {
     pub avatar: String,
     pub dept_id: Option<String>,
+    pub desc: String,
     pub email: String,
     pub home_path: String,
     pub id: String,
@@ -344,5 +347,6 @@ pub struct UserRecord {
     pub remark: String,
     pub role_ids: Vec<String>,
     pub status: i32,
+    pub timezone: String,
     pub username: String,
 }

@@ -1,8 +1,11 @@
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::{
-    models::auth::{AuthUser, AuthUserRecord, LoginRequest, LoginResponse, UserInfoResponse},
+    models::auth::{
+        AuthUser, AuthUserRecord, LoginRequest, LoginResponse, TimezoneRequest,
+        UpdatePasswordRequest, UpdateProfileRequest, UserInfoResponse,
+    },
     repositories::user as user_repo,
     state::AppState,
 };
@@ -72,6 +75,7 @@ pub fn authorize_sync(headers: &HeaderMap) -> Option<String> {
 pub fn to_user_info(user: &AuthUser) -> UserInfoResponse {
     UserInfoResponse {
         avatar: user.avatar.clone(),
+        desc: user.desc.clone(),
         home_path: user.home_path.clone(),
         real_name: user.real_name.clone(),
         roles: user.roles.clone(),
@@ -81,131 +85,11 @@ pub fn to_user_info(user: &AuthUser) -> UserInfoResponse {
 }
 
 pub async fn bootstrap_menu_tree(state: &AppState, user: &AuthUser) -> Value {
-    let system_children = crate::services::system::navigation_menus_for_user(state, &user.user_id)
+    let menus = crate::services::system::navigation_menus_for_user(state, &user.user_id)
         .await
         .ok()
         .unwrap_or_default();
-
-    let role_specific = if user.roles.iter().any(|role| role == "super") {
-        json!({
-            "component": "/demos/access/super-visible",
-            "meta": {
-                "icon": "mdi:button-cursor",
-                "title": "demos.access.superVisible"
-            },
-            "name": "AccessSuperVisibleDemo",
-            "path": "/demos/access/super-visible"
-        })
-    } else if user.roles.iter().any(|role| role == "admin") {
-        json!({
-            "component": "/demos/access/admin-visible",
-            "meta": {
-                "icon": "mdi:button-cursor",
-                "title": "demos.access.adminVisible"
-            },
-            "name": "AccessAdminVisibleDemo",
-            "path": "/demos/access/admin-visible"
-        })
-    } else {
-        json!({
-            "component": "/demos/access/user-visible",
-            "meta": {
-                "icon": "mdi:button-cursor",
-                "title": "demos.access.userVisible"
-            },
-            "name": "AccessUserVisibleDemo",
-            "path": "/demos/access/user-visible"
-        })
-    };
-
-    let mut menus = vec![
-        json!({
-            "meta": {
-                "order": -1,
-                "title": "page.dashboard.title"
-            },
-            "name": "Dashboard",
-            "path": "/dashboard",
-            "redirect": "/analytics",
-            "children": [
-                {
-                    "name": "Analytics",
-                    "path": "/analytics",
-                    "component": "/dashboard/analytics/index",
-                    "meta": {
-                        "affixTab": true,
-                        "title": "page.dashboard.analytics"
-                    }
-                },
-                {
-                    "name": "Workspace",
-                    "path": "/workspace",
-                    "component": "/dashboard/workspace/index",
-                    "meta": {
-                        "title": "page.dashboard.workspace"
-                    }
-                }
-            ]
-        }),
-        json!({
-            "meta": {
-                "icon": "ic:baseline-view-in-ar",
-                "keepAlive": true,
-                "order": 1000,
-                "title": "demos.title"
-            },
-            "name": "Demos",
-            "path": "/demos",
-            "redirect": "/demos/access",
-            "children": [
-                {
-                    "name": "AccessDemos",
-                    "path": "/demosaccess",
-                    "meta": {
-                        "icon": "mdi:cloud-key-outline",
-                        "title": "demos.access.backendPermissions"
-                    },
-                    "redirect": "/demos/access/page-control",
-                    "children": [
-                        {
-                            "name": "AccessPageControlDemo",
-                            "path": "/demos/access/page-control",
-                            "component": "/demos/access/index",
-                            "meta": {
-                                "icon": "mdi:page-previous-outline",
-                                "title": "demos.access.pageAccess"
-                            }
-                        },
-                        {
-                            "name": "AccessButtonControlDemo",
-                            "path": "/demos/access/button-control",
-                            "component": "/demos/access/button-control",
-                            "meta": {
-                                "icon": "mdi:button-cursor",
-                                "title": "demos.access.buttonControl"
-                            }
-                        },
-                        role_specific
-                    ]
-                }
-            ]
-        }),
-    ];
-
-    if !system_children.is_empty() {
-        menus.push(json!({
-            "meta": {
-                "icon": "ion:settings-outline",
-                "order": 9997,
-                "title": "system.title"
-            },
-            "name": "System",
-            "path": "/system",
-            "children": system_children
-        }));
-    }
-
-    Value::Array(menus)
+    serde_json::to_value(menus).unwrap_or_else(|_| Value::Array(Vec::new()))
 }
 
 pub fn access_token_for(username: &str) -> String {
@@ -259,16 +143,87 @@ fn to_login_response(user: &AuthUser) -> LoginResponse {
     }
 }
 
+pub async fn update_profile(
+    state: &AppState,
+    user: &AuthUser,
+    payload: UpdateProfileRequest,
+) -> Result<UserInfoResponse, (StatusCode, &'static str)> {
+    if payload.real_name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Real name is required"));
+    }
+
+    user_repo::update_user_profile(&state.pool, &user.user_id, &payload.real_name, &payload.desc)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?;
+
+    let updated = user_repo::get_auth_user_by_username(&state.pool, &user.username)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found"))?;
+    let auth_user = build_auth_user(state, updated)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?;
+
+    Ok(to_user_info(&auth_user))
+}
+
+pub async fn update_password(
+    state: &AppState,
+    user: &AuthUser,
+    payload: UpdatePasswordRequest,
+) -> Result<(), (StatusCode, &'static str)> {
+    if payload.old_password.is_empty() || payload.new_password.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Password is required"));
+    }
+
+    let current_user = user_repo::get_auth_user_by_username(&state.pool, &user.username)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found"))?;
+    if current_user.password != payload.old_password {
+        return Err((StatusCode::FORBIDDEN, "Username or password is incorrect."));
+    }
+
+    user_repo::change_user_password(&state.pool, &user.user_id, &payload.new_password)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?;
+
+    Ok(())
+}
+
+pub async fn get_timezone(
+    state: &AppState,
+    user: &AuthUser,
+) -> Result<String, (StatusCode, &'static str)> {
+    user_repo::get_user_timezone(&state.pool, &user.user_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?
+        .ok_or((StatusCode::NOT_FOUND, "User not found"))
+}
+
+pub async fn set_timezone(
+    state: &AppState,
+    user: &AuthUser,
+    payload: TimezoneRequest,
+) -> Result<(), (StatusCode, &'static str)> {
+    if payload.timezone.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Timezone is required"));
+    }
+
+    user_repo::set_user_timezone(&state.pool, &user.user_id, &payload.timezone)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error"))?;
+    Ok(())
+}
+
 async fn build_auth_user(state: &AppState, user: AuthUserRecord) -> Result<AuthUser, sqlx::Error> {
     let permission_ids = user_repo::list_user_permission_ids(&state.pool, &user.user_id).await?;
-    let mut access_codes = user_repo::list_permission_auth_codes(&state.pool, &permission_ids).await?;
-    access_codes.extend(demo_access_codes(&user.role_ids));
-    access_codes.sort();
-    access_codes.dedup();
+    let access_codes = user_repo::list_permission_auth_codes(&state.pool, &permission_ids).await?;
 
     Ok(AuthUser {
         access_codes,
         avatar: user.avatar,
+        desc: user.desc,
         home_path: user.home_path,
         id: user.id.clone(),
         real_name: user.real_name,
@@ -277,24 +232,6 @@ async fn build_auth_user(state: &AppState, user: AuthUserRecord) -> Result<AuthU
         user_id: user.user_id,
         username: user.username,
     })
-}
-
-fn demo_access_codes(role_ids: &[String]) -> Vec<String> {
-    let role_codes = role_ids
-        .iter()
-        .map(|role_id| role_code_from_id(role_id))
-        .collect::<Vec<_>>();
-    if role_codes.iter().any(|role| role == "super" || role == "admin") {
-        return vec![
-            "AC_100010".into(),
-            "AC_100020".into(),
-            "AC_100030".into(),
-        ];
-    }
-    if role_codes.iter().any(|role| role == "user") {
-        return vec!["AC_1000001".into(), "AC_1000002".into()];
-    }
-    Vec::new()
 }
 
 fn role_code_from_id(role_id: &str) -> String {

@@ -6,7 +6,7 @@ use axum::{
 use serde_json::json;
 
 use crate::{
-    models::auth::LoginRequest,
+    models::auth::{LoginRequest, UpdatePasswordRequest, UpdateProfileRequest},
     response::{error_response, success_response},
     services::auth as auth_service,
     state::AppState,
@@ -61,6 +61,40 @@ pub async fn access_codes(State(state): State<AppState>, headers: HeaderMap) -> 
 pub async fn user_info(State(state): State<AppState>, headers: HeaderMap) -> Response {
     match auth_service::authorize(&state, &headers).await {
         Some(user) => Json(success_response(auth_service::to_user_info(&user))).into_response(),
+        None => error_response(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized Exception",
+        ),
+    }
+}
+
+pub async fn update_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<UpdateProfileRequest>,
+) -> Response {
+    match auth_service::authorize(&state, &headers).await {
+        Some(user) => match auth_service::update_profile(&state, &user, payload).await {
+            Ok(data) => Json(success_response(data)).into_response(),
+            Err((status, message)) => error_response(status, message),
+        },
+        None => error_response(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Unauthorized Exception",
+        ),
+    }
+}
+
+pub async fn update_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<UpdatePasswordRequest>,
+) -> Response {
+    match auth_service::authorize(&state, &headers).await {
+        Some(user) => match auth_service::update_password(&state, &user, payload).await {
+            Ok(()) => Json(success_response("")).into_response(),
+            Err((status, message)) => error_response(status, message),
+        },
         None => error_response(
             axum::http::StatusCode::UNAUTHORIZED,
             "Unauthorized Exception",
